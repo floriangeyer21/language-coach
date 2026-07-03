@@ -22,9 +22,7 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
-    NEXT_TELEMETRY_DISABLED=1 \
-    PORT=3000 \
-    HOSTNAME=0.0.0.0
+    NEXT_TELEMETRY_DISABLED=1
 
 # Standalone output: server.js + minimal node_modules, plus static assets & public.
 COPY --from=builder /app/public ./public
@@ -32,4 +30,7 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
 EXPOSE 3000
-CMD ["node", "server.js"]
+# Force host/port at process start: the container runtime overrides the HOSTNAME
+# env var with the container's own hostname, which would make Next's standalone
+# server bind to the wrong interface and fail App Runner's TCP health check.
+CMD ["sh", "-c", "HOSTNAME=0.0.0.0 PORT=3000 node server.js"]
