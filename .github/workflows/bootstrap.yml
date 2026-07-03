@@ -1,0 +1,107 @@
+name: Bootstrap AWS (first deploy)
+
+# One-time (idempotent) full provision: creates the Terraform state bucket, then
+# runs the ordered deploy (ECR -> push API -> API service + RDS + secrets ->
+# push web with API URL baked in -> web service -> lock CORS). Re-runnable.
+# Trigger manually from the Actions tab or via `gh workflow run bootstrap.yml`.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+      PROJECT: ${{ vars.PROJECT || 'languagecoach' }}
+      TF_VAR_region: ${{ vars.AWS_REGION || 'eu-central-1' }}
+      TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Ensure Terraform state bucket
+        id: state
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          BUCKET="${PROJECT}-tfstate-${ACCOUNT_ID}"
+          if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+            aws s3api create-bucket --bucket "$BUCKET" --region "$AWS_REGION" \
+              --create-bucket-configuration LocationConstraint="$AWS_REGION"
+            aws s3api put-bucket-versioning --bucket "$BUCKET" \
+              --versioning-configuration Status=Enabled
+          fi
+          echo "bucket=$BUCKET" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy
+        working-directory: infra/terraform
+        run: |
+          set -euo pipefail
+          terraform init \
+            -backend-config="bucket=${{ steps.state.outputs.bucket }}" \
+            -backend-config="key=${PROJECT}/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}"
+
+          echo "::group::Phase 1 - ECR repos"
+          terraform apply -auto-approve \
+            -target=aws_ecr_repository.api -target=aws_ecr_repository.web
+          echo "::endgroup::"
+
+          API_REPO="$(terraform output -raw ecr_api_repo_url)"
+          WEB_REPO="$(terraform output -raw ecr_web_repo_url)"
+          REGISTRY="${API_REPO%/*}"
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+
+          echo "::group::Phase 2 - build & push API"
+          docker build -t "$API_REPO:latest" "$GITHUB_WORKSPACE/app/Server"
+          docker push "$API_REPO:latest"
+          echo "::endgroup::"
+
+          echo "::group::Phase 3 - RDS + secrets + API service (~10 min)"
+          terraform apply -auto-approve -target=aws_apprunner_service.api
+          echo "::endgroup::"
+
+          API_URL="$(terraform output -raw api_url)"
+          echo "API_URL=$API_URL"
+
+          echo "::group::Phase 4 - build & push web (API URL baked in)"
+          docker build --build-arg "NEXT_PUBLIC_API_BASE_URL=$API_URL" \
+            -t "$WEB_REPO:latest" "$GITHUB_WORKSPACE/app/Web"
+          docker push "$WEB_REPO:latest"
+          echo "::endgroup::"
+
+          echo "::group::Phase 5 - web service + full apply"
+          terraform apply -auto-approve
+          echo "::endgroup::"
+
+          WEB_URL="$(terraform output -raw web_url)"
+
+          echo "::group::Phase 6 - lock CORS to web origin"
+          terraform apply -auto-approve -var "cors_origins=$WEB_URL"
+          echo "::endgroup::"
+
+          {
+            echo "## LanguageCoach is deployed :rocket:"
+            echo ""
+            echo "| | URL |"
+            echo "|---|---|"
+            echo "| Web | $WEB_URL |"
+            echo "| API | $API_URL |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "WEB_URL=$WEB_URL"

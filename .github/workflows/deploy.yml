@@ -1,0 +1,100 @@
+name: Deploy to AWS App Runner
+
+# Push-to-deploy: rebuild the changed service image(s), push to ECR, and trigger
+# an App Runner rolling deploy. Infra is managed separately with Terraform.
+#
+# Required repo secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+# Required repo variables (Settings > Variables): AWS_REGION, PROJECT
+# (PROJECT defaults to "languagecoach" if unset).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/Server/**"
+      - "app/Web/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+      PROJECT: ${{ vars.PROJECT || 'languagecoach' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Detect changed services
+        id: changes
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "api=true"  >> "$GITHUB_OUTPUT"
+            echo "web=true"  >> "$GITHUB_OUTPUT"
+          else
+            DIFF="$(git diff --name-only "$BEFORE" "${{ github.sha }}")"
+            echo "$DIFF" | grep -q '^app/Server/' && echo "api=true"  >> "$GITHUB_OUTPUT" || echo "api=false" >> "$GITHUB_OUTPUT"
+            echo "$DIFF" | grep -q '^app/Web/'    && echo "web=true"  >> "$GITHUB_OUTPUT" || echo "web=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve resource names
+        id: names
+        run: |
+          REG="${{ steps.ecr.outputs.registry }}"
+          echo "api_repo=$REG/${PROJECT}-api"  >> "$GITHUB_OUTPUT"
+          echo "web_repo=$REG/${PROJECT}-web"  >> "$GITHUB_OUTPUT"
+          API_ARN="$(aws apprunner list-services --region "$AWS_REGION" \
+            --query "ServiceSummaryList[?ServiceName=='${PROJECT}-api'].ServiceArn" --output text)"
+          WEB_ARN="$(aws apprunner list-services --region "$AWS_REGION" \
+            --query "ServiceSummaryList[?ServiceName=='${PROJECT}-web'].ServiceArn" --output text)"
+          if [ -z "$API_ARN" ] || [ "$API_ARN" = "None" ]; then
+            echo "App Runner services not found — run the Bootstrap workflow first. Skipping."
+            echo "bootstrapped=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          API_URL="$(aws apprunner describe-service --region "$AWS_REGION" --service-arn "$API_ARN" \
+            --query 'Service.ServiceUrl' --output text)"
+          echo "bootstrapped=true" >> "$GITHUB_OUTPUT"
+          echo "api_arn=$API_ARN" >> "$GITHUB_OUTPUT"
+          echo "web_arn=$WEB_ARN" >> "$GITHUB_OUTPUT"
+          echo "api_url=https://$API_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push API
+        if: steps.changes.outputs.api == 'true' && steps.names.outputs.bootstrapped == 'true'
+        run: |
+          docker build --platform linux/amd64 \
+            -t "${{ steps.names.outputs.api_repo }}:${{ github.sha }}" \
+            -t "${{ steps.names.outputs.api_repo }}:latest" \
+            app/Server
+          docker push "${{ steps.names.outputs.api_repo }}:${{ github.sha }}"
+          docker push "${{ steps.names.outputs.api_repo }}:latest"
+          aws apprunner start-deployment --region "$AWS_REGION" \
+            --service-arn "${{ steps.names.outputs.api_arn }}"
+
+      - name: Build & push web
+        if: steps.changes.outputs.web == 'true' && steps.names.outputs.bootstrapped == 'true'
+        run: |
+          docker build --platform linux/amd64 \
+            --build-arg "NEXT_PUBLIC_API_BASE_URL=${{ steps.names.outputs.api_url }}" \
+            -t "${{ steps.names.outputs.web_repo }}:${{ github.sha }}" \
+            -t "${{ steps.names.outputs.web_repo }}:latest" \
+            app/Web
+          docker push "${{ steps.names.outputs.web_repo }}:${{ github.sha }}"
+          docker push "${{ steps.names.outputs.web_repo }}:latest"
+          aws apprunner start-deployment --region "$AWS_REGION" \
+            --service-arn "${{ steps.names.outputs.web_arn }}"

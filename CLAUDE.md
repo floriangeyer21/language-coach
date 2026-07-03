@@ -16,8 +16,15 @@ The `context/spec/overview.md` is the entry point. It contains the project visio
 
 `context/CHANGELOG.md` is a running, high-level record of what has been done to
 the project (planning, features, infra, tooling). Consult it to quickly get up
-to speed on project history, and append a short one-line entry whenever you
-complete a meaningful step (newest entries at the top).
+to speed on project history.
+
+**Always update it.** Whenever you complete a meaningful step on this project —
+planning or writing a spec, implementing or changing a feature, infra/tooling
+work, deployment, config or git changes — append a short one-line entry to
+`context/CHANGELOG.md` before finishing. Newest entries at the top, grouped
+under the current date. Keep each entry to one line (a general description, not
+details); the *why* and *how* live in the specs under `context/spec/`. Do not
+skip this step, even for small changes.
 
 ## Feature Spec Lifecycle
 

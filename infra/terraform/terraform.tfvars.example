@@ -1,0 +1,16 @@
+# Copy to terraform.tfvars (gitignored) and fill in. Secrets can also be passed
+# via environment: export TF_VAR_openai_api_key=sk-...
+
+region              = "eu-central-1"
+project             = "languagecoach"
+
+# Rotated OpenAI key (NEVER commit the real value).
+# openai_api_key    = "sk-proj-..."
+
+# After the web service exists, set this to its https URL and re-apply so the
+# API restricts CORS. Leave as "*" for the first bootstrap.
+# cors_origins      = "https://xxxxx.eu-central-1.awsapprunner.com"
+
+# For a throwaway environment you can allow teardown without a final snapshot:
+# db_deletion_protection = false
+# db_skip_final_snapshot = true

@@ -1,0 +1,10 @@
+# Terraform state may contain secrets (DB password, JWT, DSN) — never commit it.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+crash.log
+
+# Local variable files hold secrets.
+terraform.tfvars
+*.auto.tfvars

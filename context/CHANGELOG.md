@@ -7,6 +7,19 @@ For the *why* and *how*, consult the specs under `context/spec/`.
 
 ## 2026-07-03
 
+- **AWS deployment (planned + scaffolded)** — Wrote deploy spec
+  (`features/new/aws-deployment.md`) and all artifacts: Dockerfiles (API +
+  Next.js standalone web), Terraform for App Runner ×2 + RDS MySQL (private,
+  encrypted, backed up) + ECR + Secrets Manager + VPC/NAT + IAM, a
+  `bootstrap.sh`/`deploy.sh`, GitHub Actions push-to-deploy, and a runbook
+  (`infra/README.md`). Not yet provisioned (awaiting local tooling + OpenAI key).
+- **AWS deploy config** — Chose region `eu-central-1`, dropped the NAT gateway to
+  save cost (RDS now publicly accessible, credential-protected — see spec
+  tradeoff), and stored AWS creds locally under the `languagecoach` profile.
+- **CI-driven bootstrap** — Local Docker/Terraform blocked (macOS CLT install
+  failing), so added a GitHub Actions `bootstrap.yml` that provisions everything
+  on the runner with S3 remote state; set repo secrets/vars. Deploy workflow
+  guarded to no-op until bootstrap runs.
 - **Git & GitHub** — Initialized git repo, added `.gitignore` (excludes `.env`
   secrets, `node_modules`, `.data/`), made the initial commit, installed `gh`
   CLI, and pushed to a public GitHub repo (`language-coach`).
