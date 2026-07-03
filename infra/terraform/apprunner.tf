@@ -41,7 +41,7 @@ resource "aws_apprunner_service" "api" {
     protocol = "TCP"
   }
 
-  depends_on = [aws_db_instance.mysql]
+  depends_on = [aws_db_instance.mysql, time_sleep.wait_iam]
 }
 
 # ---- Web service ----
@@ -72,4 +72,6 @@ resource "aws_apprunner_service" "web" {
   health_check_configuration {
     protocol = "TCP"
   }
+
+  depends_on = [time_sleep.wait_iam]
 }

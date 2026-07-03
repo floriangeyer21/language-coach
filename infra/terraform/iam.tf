@@ -53,3 +53,16 @@ resource "aws_iam_role_policy" "instance_read_secrets" {
   role   = aws_iam_role.apprunner_instance.id
   policy = data.aws_iam_policy_document.read_secrets.json
 }
+
+# App Runner validates the access/instance roles at service-create time, which
+# can beat IAM's global propagation and fail with "Invalid Access Role". Wait a
+# bit after the roles/policies exist before creating the services.
+resource "time_sleep" "wait_iam" {
+  depends_on = [
+    aws_iam_role.apprunner_access,
+    aws_iam_role_policy_attachment.apprunner_ecr,
+    aws_iam_role.apprunner_instance,
+    aws_iam_role_policy.instance_read_secrets,
+  ]
+  create_duration = "45s"
+}
