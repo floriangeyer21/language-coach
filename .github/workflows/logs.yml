@@ -1,0 +1,40 @@
+name: Diagnose App Runner logs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+      PROJECT: ${{ vars.PROJECT || 'languagecoach' }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Dump API service events + application logs
+        run: |
+          set -euo pipefail
+          ARN="$(aws apprunner list-services --region "$AWS_REGION" \
+            --query "ServiceSummaryList[?ServiceName=='${PROJECT}-api'].ServiceArn" --output text)"
+          echo "Service ARN: $ARN"
+          SID="${ARN##*/}"
+          echo "Service ID: $SID"
+
+          echo "::group::Service log group (deployment/events)"
+          SVC_LG="/aws/apprunner/${PROJECT}-api/${SID}/service"
+          aws logs tail "$SVC_LG" --region "$AWS_REGION" --since 40m 2>&1 | tail -100 || echo "no service log group yet"
+          echo "::endgroup::"
+
+          echo "::group::Application log group (container stdout/stderr)"
+          APP_LG="/aws/apprunner/${PROJECT}-api/${SID}/application"
+          aws logs tail "$APP_LG" --region "$AWS_REGION" --since 40m 2>&1 | tail -200 || echo "no application log group yet"
+          echo "::endgroup::"
