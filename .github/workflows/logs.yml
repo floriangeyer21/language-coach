@@ -26,21 +26,19 @@ jobs:
           aws apprunner list-services --region "$AWS_REGION" \
             --query "ServiceSummaryList[].{Name:ServiceName,Status:Status,Url:ServiceUrl}" --output table
 
-      - name: Dump API service events + application logs
+      - name: Dump service events + application logs
         run: |
           set -euo pipefail
-          ARN="$(aws apprunner list-services --region "$AWS_REGION" \
-            --query "ServiceSummaryList[?ServiceName=='${PROJECT}-api'].ServiceArn" --output text)"
-          echo "Service ARN: $ARN"
-          SID="${ARN##*/}"
-          echo "Service ID: $SID"
-
-          echo "::group::Service log group (deployment/events)"
-          SVC_LG="/aws/apprunner/${PROJECT}-api/${SID}/service"
-          aws logs tail "$SVC_LG" --region "$AWS_REGION" --since 40m 2>&1 | tail -100 || echo "no service log group yet"
-          echo "::endgroup::"
-
-          echo "::group::Application log group (container stdout/stderr)"
-          APP_LG="/aws/apprunner/${PROJECT}-api/${SID}/application"
-          aws logs tail "$APP_LG" --region "$AWS_REGION" --since 40m 2>&1 | tail -200 || echo "no application log group yet"
-          echo "::endgroup::"
+          for SVC in api web; do
+            NAME="${PROJECT}-${SVC}"
+            ARN="$(aws apprunner list-services --region "$AWS_REGION" \
+              --query "ServiceSummaryList[?ServiceName=='${NAME}'].ServiceArn" --output text)"
+            [ -z "$ARN" ] && { echo "== $NAME: not found =="; continue; }
+            SID="${ARN##*/}"
+            echo "::group::$NAME service events"
+            aws logs tail "/aws/apprunner/${NAME}/${SID}/service" --region "$AWS_REGION" --since 50m 2>&1 | tail -60 || echo "no service log group"
+            echo "::endgroup::"
+            echo "::group::$NAME application logs"
+            aws logs tail "/aws/apprunner/${NAME}/${SID}/application" --region "$AWS_REGION" --since 50m 2>&1 | tail -120 || echo "no application log group"
+            echo "::endgroup::"
+          done
