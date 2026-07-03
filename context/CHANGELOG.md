@@ -7,6 +7,16 @@ For the *why* and *how*, consult the specs under `context/spec/`.
 
 ## 2026-07-03
 
+- **Stop/start workflow** — Added `.github/workflows/power.yml` (workflow_dispatch
+  stop|start) that pauses App Runner services and stops RDS to save money;
+  data/storage/secrets preserved.
+- **AWS deployment LIVE** — Provisioned all infra via the CI bootstrap and both
+  App Runner services reached RUNNING. Web: `cewgpdfqme.eu-central-1.awsapprunner.com`,
+  API: `k63sa7z9sg.eu-central-1.awsapprunner.com` (`/docs` 200). Debug fixes:
+  RDS depends_on IGW/route (VPC state race), `time_sleep.wait_iam` (IAM
+  propagation), API depends_on secret *versions* (AWSCURRENT race), and web
+  Dockerfile CMD forces `HOSTNAME=0.0.0.0 PORT=3000` (Next standalone TCP health
+  check). Spec moved to `features/existing/`. Push-to-deploy now active.
 - **AWS deployment (planned + scaffolded)** — Wrote deploy spec
   (`features/new/aws-deployment.md`) and all artifacts: Dockerfiles (API +
   Next.js standalone web), Terraform for App Runner ×2 + RDS MySQL (private,
