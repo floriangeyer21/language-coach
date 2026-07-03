@@ -12,6 +12,13 @@ This is a **spec-driven project**. Before writing or modifying any code:
 
 The `context/spec/overview.md` is the entry point. It contains the project vision, core concepts, and an index of all spec files.
 
+## Change Log
+
+`context/CHANGELOG.md` is a running, high-level record of what has been done to
+the project (planning, features, infra, tooling). Consult it to quickly get up
+to speed on project history, and append a short one-line entry whenever you
+complete a meaningful step (newest entries at the top).
+
 ## Feature Spec Lifecycle
 
 Features live in `context/spec/features/` and follow a two-stage flow:
