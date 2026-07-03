@@ -36,4 +36,8 @@ resource "aws_db_instance" "mysql" {
 
   apply_immediately = true
   tags              = { Name = "${var.project}-mysql" }
+
+  # A publicly accessible DB requires the VPC's internet gateway + public routing
+  # to exist first. Explicit so `-target` phased applies pull these in.
+  depends_on = [aws_internet_gateway.igw, aws_route_table_association.public]
 }
