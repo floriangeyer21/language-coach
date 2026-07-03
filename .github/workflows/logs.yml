@@ -20,6 +20,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Service statuses
+        run: |
+          set -euo pipefail
+          aws apprunner list-services --region "$AWS_REGION" \
+            --query "ServiceSummaryList[].{Name:ServiceName,Status:Status,Url:ServiceUrl}" --output table
+
       - name: Dump API service events + application logs
         run: |
           set -euo pipefail
