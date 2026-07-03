@@ -41,7 +41,15 @@ resource "aws_apprunner_service" "api" {
     protocol = "TCP"
   }
 
-  depends_on = [aws_db_instance.mysql, time_sleep.wait_iam]
+  # Depend on the secret *versions* (values), not just the secret containers, so
+  # a -target'd apply doesn't start the service before AWSCURRENT exists.
+  depends_on = [
+    aws_db_instance.mysql,
+    time_sleep.wait_iam,
+    aws_secretsmanager_secret_version.openai_api_key,
+    aws_secretsmanager_secret_version.jwt_secret,
+    aws_secretsmanager_secret_version.database_url,
+  ]
 }
 
 # ---- Web service ----
