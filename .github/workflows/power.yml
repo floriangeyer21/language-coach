@@ -1,0 +1,78 @@
+name: Power (stop / start app)
+
+# Pause/resume App Runner services and stop/start RDS to save money without
+# losing data. RDS storage, secrets, and ECR images are always preserved.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "stop = pause everything to save money; start = bring it back"
+        required: true
+        type: choice
+        options: [stop, start]
+
+permissions:
+  contents: read
+
+jobs:
+  power:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+      PROJECT: ${{ vars.PROJECT || 'languagecoach' }}
+      ACTION: ${{ inputs.action }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: App Runner ${{ inputs.action }}
+        run: |
+          set -euo pipefail
+          for SVC in api web; do
+            NAME="${PROJECT}-${SVC}"
+            ARN="$(aws apprunner list-services --region "$AWS_REGION" \
+              --query "ServiceSummaryList[?ServiceName=='${NAME}'].ServiceArn" --output text)"
+            [ -z "$ARN" ] && { echo "$NAME: not found, skipping"; continue; }
+            if [ "$ACTION" = "stop" ]; then
+              echo "Pausing $NAME"
+              aws apprunner pause-service  --region "$AWS_REGION" --service-arn "$ARN" >/dev/null || true
+            else
+              echo "Resuming $NAME"
+              aws apprunner resume-service --region "$AWS_REGION" --service-arn "$ARN" >/dev/null || true
+            fi
+          done
+
+      - name: RDS ${{ inputs.action }}
+        run: |
+          set -euo pipefail
+          DB="${PROJECT}-mysql"
+          STATE="$(aws rds describe-db-instances --region "$AWS_REGION" \
+            --db-instance-identifier "$DB" \
+            --query "DBInstances[0].DBInstanceStatus" --output text 2>/dev/null || echo missing)"
+          echo "$DB current state: $STATE"
+          if [ "$ACTION" = "stop" ]; then
+            if [ "$STATE" = "available" ]; then
+              aws rds stop-db-instance --region "$AWS_REGION" --db-instance-identifier "$DB" >/dev/null
+              echo "Stopping $DB (AWS auto-starts it again after 7 days)."
+            else
+              echo "Not in 'available' state; nothing to stop."
+            fi
+          else
+            if [ "$STATE" = "stopped" ]; then
+              aws rds start-db-instance --region "$AWS_REGION" --db-instance-identifier "$DB" >/dev/null
+              echo "Starting $DB (takes a few minutes to become available)."
+            else
+              echo "Not in 'stopped' state; nothing to start."
+            fi
+          fi
+
+      - name: Note
+        run: |
+          if [ "$ACTION" = "start" ]; then
+            echo "Give it ~3-5 min: RDS must reach 'available' and App Runner 'RUNNING'."
+            echo "Run the 'Diagnose App Runner logs' workflow to check status + URLs."
+          fi
